@@ -299,12 +299,14 @@ var (
 )
 
 // NewDefaultKubectlCommand creates the `kubectl` command with default arguments
+// k8s的命令行工具采用了 cobra 库，具有命令提示等强大功能，比go语言自带的flag强大很多，可参考 https://github.com/spf13/cobra
 func NewDefaultKubectlCommand() *cobra.Command {
 	return NewDefaultKubectlCommandWithArgs(NewDefaultPluginHandler(plugin.ValidPluginFilenamePrefixes), os.Args, os.Stdin, os.Stdout, os.Stderr)
 }
 
 // NewDefaultKubectlCommandWithArgs creates the `kubectl` command with arguments
 func NewDefaultKubectlCommandWithArgs(pluginHandler PluginHandler, args []string, in io.Reader, out, errout io.Writer) *cobra.Command {
+	// 初始化NewKubectlCommand，采用标准输入、输出、错误输出
 	cmd := NewKubectlCommand(in, out, errout)
 
 	if pluginHandler == nil {
@@ -312,6 +314,7 @@ func NewDefaultKubectlCommandWithArgs(pluginHandler PluginHandler, args []string
 	}
 
 	if len(args) > 1 {
+		// 这里为传入的参数，即 create -f nginx_pod.yaml 部分
 		cmdPathPieces := args[1:]
 
 		// only look for suitable extension executables if
@@ -434,6 +437,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 	warningsAsErrors := false
 
 	// Parent command to which all subcommands are added.
+	// 创建主命令
 	cmds := &cobra.Command{
 		Use:   "kubectl",
 		Short: i18n.T("kubectl controls the Kubernetes cluster manager"),
@@ -445,14 +449,19 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 		Run: runHelp,
 		// Hook before and after Run initialize and write profiles to disk,
 		// respectively.
+		// 初始化后，在运行指令前的钩子
 		PersistentPreRunE: func(*cobra.Command, []string) error {
 			rest.SetDefaultWarningHandler(warningHandler)
+			// profile 性能分析
 			return initProfiling()
 		},
+		// 运行指令后钩子
 		PersistentPostRunE: func(*cobra.Command, []string) error {
+			// 保存profile性能分析
 			if err := flushProfiling(); err != nil {
 				return err
 			}
+			// 汇总warn数
 			if warningsAsErrors {
 				count := warningHandler.WarningCount()
 				switch count {
@@ -466,6 +475,8 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 			}
 			return nil
 		},
+		// bash自动补齐功能，可通过 kubectl completion bash 命令查看
+		// 具体安装可参考 https://kubernetes.io/docs/tasks/tools/install-kubectl/#enabling-shell-autocompletion
 		BashCompletionFunction: bashCompletionFunc,
 	}
 
@@ -487,6 +498,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 
 	cmds.PersistentFlags().AddGoFlagSet(flag.CommandLine)
 
+	// 工厂模式
 	f := cmdutil.NewFactory(matchVersionKubeConfigFlags)
 
 	// Sending in 'nil' for the getLanguageFn() results in using
@@ -500,9 +512,11 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 	cmds.SetGlobalNormalizationFunc(cliflag.WarnWordSepNormalizeFunc)
 
 	ioStreams := genericclioptions.IOStreams{In: in, Out: out, ErrOut: err}
+	// kubectl定义了7类命令，结合Message和各个子命令的package名来看
 
 	groups := templates.CommandGroups{
 		{
+			// 1. 初级命令，包括 create/expose/run/set
 			Message: "Basic Commands (Beginner):",
 			Commands: []*cobra.Command{
 				create.NewCmdCreate(f, ioStreams),
@@ -512,6 +526,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 			},
 		},
 		{
+			// 2. 中级命令，包括explain/get/edit/delete
 			Message: "Basic Commands (Intermediate):",
 			Commands: []*cobra.Command{
 				explain.NewCmdExplain("kubectl", f, ioStreams),
@@ -521,6 +536,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 			},
 		},
 		{
+			// 3. 部署命令，包括 rollout/scale/autoscale
 			Message: "Deploy Commands:",
 			Commands: []*cobra.Command{
 				rollout.NewCmdRollout(f, ioStreams),
@@ -529,6 +545,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 			},
 		},
 		{
+			// 4.集群管理命令, 包括certificates/clusterinfo/top/drain/taint
 			Message: "Cluster Management Commands:",
 			Commands: []*cobra.Command{
 				certificates.NewCmdCertificate(f, ioStreams),
@@ -541,6 +558,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 			},
 		},
 		{
+			// 5.故障排查和调试，包括 describe/logs/attach/exec/port-forward/proxy/cp/auth
 			Message: "Troubleshooting and Debugging Commands:",
 			Commands: []*cobra.Command{
 				describe.NewCmdDescribe("kubectl", f, ioStreams),
@@ -554,6 +572,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 			},
 		},
 		{
+			// 6. 高级命令，包括diff/apply/patch/replace/wait/convert/kustomize
 			Message: "Advanced Commands:",
 			Commands: []*cobra.Command{
 				diff.NewCmdDiff(f, ioStreams),
@@ -566,6 +585,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 			},
 		},
 		{
+			// 7. 设置命令，包括label，annotate，completion
 			Message: "Settings Commands:",
 			Commands: []*cobra.Command{
 				label.NewCmdLabel(f, ioStreams),
@@ -579,6 +599,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 	filters := []string{"options"}
 
 	// Hide the "alpha" subcommand if there are no alpha commands in this build.
+	// alpha版本相关命令
 	alpha := cmdpkg.NewCmdAlpha(f, ioStreams)
 	if !alpha.HasSubCommands() {
 		filters = append(filters, alpha.Name())
@@ -586,6 +607,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 
 	templates.ActsAsRootCommand(cmds, filters, groups...)
 
+	// 代码补全
 	for name, completion := range bashCompletionFlags {
 		if cmds.Flag(name) != nil {
 			if cmds.Flag(name).Annotations == nil {
@@ -598,6 +620,7 @@ func NewKubectlCommand(in io.Reader, out, err io.Writer) *cobra.Command {
 		}
 	}
 
+	// 添加其余子命令，包括 alpha/config/plugin/version/api-versions/api-resources/options
 	cmds.AddCommand(alpha)
 	cmds.AddCommand(cmdconfig.NewCmdConfig(f, clientcmd.NewDefaultPathOptions(), ioStreams))
 	cmds.AddCommand(plugin.NewCmdPlugin(f, ioStreams))
